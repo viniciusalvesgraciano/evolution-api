@@ -646,7 +646,16 @@ export class BaileysStartupService extends ChannelStartupService {
       },
       msgRetryCounterCache: this.msgRetryCounterCache,
       generateHighQualityLinkPreview: true,
-      getMessage: async (key) => (await this.getMessage(key)) as Promise<proto.IMessage>,
+      // Fork H.Tech: sem a mensagem no banco, this.getMessage devolve { conversation: '' } e o
+      // Baileys reenviava esse texto vazio a quem pediu reenvio, o que aparecia como balão vazio
+      // no grupo. Devolver undefined faz o Baileys pular o reenvio. O JSON do banco transforma os
+      // bytes em objeto ({"0":1,...}) e o proto os codifica vazios, o que sairia como foto quebrada;
+      // por isso os bytes são remontados antes de devolver.
+      getMessage: async (key) => {
+        const msg = (await this.getMessage(key)) as proto.IMessage;
+        if (!msg || (msg.conversation === '' && Object.keys(msg).length === 1)) return undefined;
+        return this.deserializeMessageBuffers(msg);
+      },
       ...browserOptions,
       markOnlineOnConnect: this.localSettings.alwaysOnline,
       retryRequestDelayMs: 350,
@@ -1478,8 +1487,6 @@ export class BaileysStartupService extends ChannelStartupService {
           if (messageRaw.key.remoteJid?.includes('@lid') && messageRaw.key.remoteJidAlt) {
             messageRaw.key.remoteJid = messageRaw.key.remoteJidAlt;
           }
-          console.log(messageRaw);
-
           this.sendDataWebhook(Events.MESSAGES_UPSERT, messageRaw);
 
           await chatbotController.emit({
@@ -2455,7 +2462,11 @@ export class BaileysStartupService extends ChannelStartupService {
         }
       }
 
-      if (this.configService.get<Database>('DATABASE').SAVE_DATA.NEW_MESSAGE) {
+      // Fork H.Tech: a mensagem ENVIADA é gravada mesmo com NEW_MESSAGE=false. O Baileys guarda a
+      // enviada só 5 min em memória; depois disso o pedido de reenvio busca no banco pelo getMessage.
+      const persistSent =
+        this.configService.get<Database>('DATABASE').SAVE_DATA.NEW_MESSAGE || !!messageRaw?.key?.fromMe;
+      if (persistSent) {
         const msg = await this.prismaRepository.message.create({ data: messageRaw });
 
         if (isMedia && this.configService.get<S3>('S3').ENABLE) {
