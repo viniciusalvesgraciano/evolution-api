@@ -648,9 +648,9 @@ export class BaileysStartupService extends ChannelStartupService {
       generateHighQualityLinkPreview: true,
       // Fork H.Tech: sem a mensagem no banco, this.getMessage devolve { conversation: '' } e o
       // Baileys reenviava esse texto vazio a quem pediu reenvio, o que aparecia como balão vazio
-      // no grupo. Devolver undefined faz o Baileys pular o reenvio. O JSON do banco transforma os
-      // bytes em objeto ({"0":1,...}) e o proto os codifica vazios, o que sairia como foto quebrada;
-      // por isso os bytes são remontados antes de devolver.
+      // no grupo. Devolver undefined faz o Baileys pular o reenvio. Os bytes podem voltar do JSON do
+      // banco como objeto ({"0":1,...}), que o proto codificaria vazio; o helper os remonta nesse
+      // caso e deixa intacto o texto base64, que o proto já aceita.
       getMessage: async (key) => {
         const msg = (await this.getMessage(key)) as proto.IMessage;
         if (!msg || (msg.conversation === '' && Object.keys(msg).length === 1)) return undefined;
@@ -2464,9 +2464,17 @@ export class BaileysStartupService extends ChannelStartupService {
 
       // Fork H.Tech: a mensagem ENVIADA é gravada mesmo com NEW_MESSAGE=false. O Baileys guarda a
       // enviada só 5 min em memória; depois disso o pedido de reenvio busca no banco pelo getMessage.
-      const persistSent =
-        this.configService.get<Database>('DATABASE').SAVE_DATA.NEW_MESSAGE || !!messageRaw?.key?.fromMe;
-      if (persistSent) {
+      // Sem await: a mensagem já saiu, e falha ou demora do banco aqui não pode virar erro de envio
+      // (quem chamou registraria falha e poderia reenviar em duplicidade). A cópia de `message` evita
+      // gravar o base64 que o bloco do webhook acrescenta logo abaixo.
+      const saveAllMessages = this.configService.get<Database>('DATABASE').SAVE_DATA.NEW_MESSAGE;
+      if (!saveAllMessages && messageRaw?.key?.fromMe) {
+        this.prismaRepository.message
+          .create({ data: { ...messageRaw, message: { ...messageRaw.message } } })
+          .catch((error) => this.logger.error(['Error saving sent message', error?.message]));
+      }
+
+      if (saveAllMessages) {
         const msg = await this.prismaRepository.message.create({ data: messageRaw });
 
         if (isMedia && this.configService.get<S3>('S3').ENABLE) {
