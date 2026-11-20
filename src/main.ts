@@ -1,5 +1,7 @@
 // Import this first from sentry instrument!
 import '@utils/instrumentSentry';
+// libsignal prints Signal session keys on every session change; keep only the label.
+import '@utils/silence-signal-session-log.install';
 
 // Now import other modules
 import { ProviderFiles } from '@api/provider/sessions';
