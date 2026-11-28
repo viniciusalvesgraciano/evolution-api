@@ -80,6 +80,7 @@ import ffmpegPath from '@ffmpeg-installer/ffmpeg';
 import { Boom } from '@hapi/boom';
 import { createId as cuid } from '@paralleldrive/cuid2';
 import { Instance, Message } from '@prisma/client';
+import { ackStatusStanzas } from '@utils/baileys-status-ack';
 import { createJid } from '@utils/createJid';
 import { fetchLatestWaWebVersion } from '@utils/fetchLatestWaWebVersion';
 import { makeProxyAgent, makeProxyAgentUndici } from '@utils/makeProxyAgent';
@@ -711,6 +712,8 @@ export class BaileysStartupService extends ChannelStartupService {
     }
 
     this.eventHandler();
+
+    ackStatusStanzas(this.client, this.logger);
 
     this.client.ws.on('CB:call', (packet) => {
       console.log('CB:call', packet);
